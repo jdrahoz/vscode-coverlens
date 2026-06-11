@@ -19,7 +19,7 @@ function detectFormat(filePath: string, content: string): CoverageFormat {
 
   // XML formats — check content to distinguish
   if (content.trimStart().startsWith('<')) {
-    if (content.includes('<report') && content.includes('jacoco')) return 'jacoco';
+    if (content.includes('<report') && content.toLowerCase().includes('jacoco')) return 'jacoco';
     if (content.includes('<coverage') && content.includes('line-rate')) return 'cobertura';
   }
 
