@@ -59,7 +59,7 @@ export class CoverageTreeProvider implements vscode.TreeDataProvider<CoverageTre
     const totalPct = this.aggregatePct(allFcs);
     const totalLines = allFcs.reduce((s, f) => s + f.metrics.totalLines, 0);
     const coveredLines = allFcs.reduce((s, f) => s + f.metrics.coveredLines, 0);
-    const summary = new CoverageSummaryItem(totalPct, allFcs.length, coveredLines, totalLines, this.thresholds);
+    const summary = new CoverageSummaryItem(totalPct, coveredLines, totalLines, this.thresholds);
 
     return [summary, ...tree];
   }
