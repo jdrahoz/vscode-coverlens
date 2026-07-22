@@ -87,7 +87,15 @@ export class CoverageTreeProvider implements vscode.TreeDataProvider<CoverageTre
       node[parts[parts.length - 1]] = fc;
     }
 
-    return this.nodeToItems(root, this.workspaceRoot);
+    // Reconstruct the base path including the stripped common prefix segments
+    const strippedPrefix = entries.length > 0
+      ? entries[0].rel.split('/').slice(0, prefixParts).join('/')
+      : '';
+    const basePath = strippedPrefix
+      ? path.join(this.workspaceRoot, strippedPrefix)
+      : this.workspaceRoot;
+
+    return this.nodeToItems(root, basePath);
   }
 
   /**
