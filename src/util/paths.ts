@@ -41,7 +41,7 @@ export async function resolveFilePath(coveragePath: string, workspaceRoot: strin
     absolute: true,
     ignore: ['**/node_modules/**', '**/vendor/**', '**/.git/**'],
     onlyFiles: true,
-    deep: 10,
+    deep: 20,
   });
 
   if (found.length === 1) {

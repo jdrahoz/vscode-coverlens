@@ -5,3 +5,5 @@ dist/
 *.vsix
 .vscode-test/
 **/.dart_tool/
+.DS_Store
+coverage/
