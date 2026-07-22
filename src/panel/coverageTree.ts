@@ -54,16 +54,30 @@ export class CoverageTreeProvider implements vscode.TreeDataProvider<CoverageTre
       placeholder.iconPath = new vscode.ThemeIcon('info');
       return [placeholder as CoverageTreeItem];
     }
-    return tree;
+
+    const allFcs = [...this.coverageMap.values()];
+    const totalPct = this.aggregatePct(allFcs);
+    const totalLines = allFcs.reduce((s, f) => s + f.metrics.totalLines, 0);
+    const summary = new CoverageSummaryItem(totalPct, allFcs.length, totalLines, this.thresholds);
+
+    return [summary, ...tree];
   }
 
   private buildTree(): CoverageTreeItem[] {
     // Group files into a virtual folder tree
     const root: Record<string, any> = {};
 
-    for (const [absPath, fc] of this.coverageMap) {
-      const rel = path.relative(this.workspaceRoot, absPath).replace(/\\/g, '/');
-      const parts = rel.split('/');
+    // Compute relative paths and strip the common directory prefix
+    const entries = [...this.coverageMap.entries()].map(([absPath, fc]) => ({
+      rel: path.relative(this.workspaceRoot, absPath).replace(/\\/g, '/'),
+      absPath,
+      fc,
+    }));
+
+    const prefixParts = this.commonDirPrefix(entries.map(e => e.rel));
+
+    for (const { rel, fc } of entries) {
+      const parts = rel.split('/').slice(prefixParts);
       let node = root;
       for (let i = 0; i < parts.length - 1; i++) {
         node[parts[i]] = node[parts[i]] ?? {};
@@ -73,6 +87,27 @@ export class CoverageTreeProvider implements vscode.TreeDataProvider<CoverageTre
     }
 
     return this.nodeToItems(root, this.workspaceRoot);
+  }
+
+  /**
+   * Returns the number of leading directory segments shared by all paths.
+   * Only directory segments (not the filename) are considered.
+   * e.g. ["src/main/java/com/Foo.java", "src/main/java/com/Bar.java"] → 4
+   */
+  private commonDirPrefix(relPaths: string[]): number {
+    if (relPaths.length === 0) return 0;
+    const dirParts = relPaths.map(p => p.split('/').slice(0, -1)); // drop filename
+    const minLen = Math.min(...dirParts.map(p => p.length));
+    let common = 0;
+    for (let i = 0; i < minLen; i++) {
+      const segment = dirParts[0][i];
+      if (dirParts.every(p => p[i] === segment)) {
+        common++;
+      } else {
+        break;
+      }
+    }
+    return common;
   }
 
   private nodeToItems(node: Record<string, any>, currentPath: string): CoverageTreeItem[] {
@@ -90,7 +125,7 @@ export class CoverageTreeProvider implements vscode.TreeDataProvider<CoverageTre
         const children = this.nodeToItems(value as Record<string, any>, childPath);
         const allFcs = this.collectFileCoverages(value as Record<string, any>);
         const aggPct = this.aggregatePct(allFcs);
-        items.push(new CoverageFolderItem(name, children, aggPct));
+        items.push(new CoverageFolderItem(name, children, aggPct, this.thresholds));
       }
     }
 
@@ -130,6 +165,16 @@ abstract class CoverageTreeItem extends vscode.TreeItem {
   children?: CoverageTreeItem[];
 }
 
+class CoverageSummaryItem extends CoverageTreeItem {
+  constructor(pct: number, fileCount: number, totalLines: number, thresholds: { low: number; medium: number }) {
+    super('Total Coverage', vscode.TreeItemCollapsibleState.None);
+    this.description = `${pct}%  ·  ${fileCount} files  ·  ${totalLines.toLocaleString()} lines`;
+    this.tooltip = `Overall project coverage: ${pct}%\nFiles: ${fileCount}\nLines: ${totalLines.toLocaleString()}`;
+    this.iconPath = iconForPct(pct, thresholds);
+    this.contextValue = 'coverlens.summary';
+  }
+}
+
 class CoverageFileItem extends CoverageTreeItem {
   constructor(
     name: string,
@@ -139,7 +184,7 @@ class CoverageFileItem extends CoverageTreeItem {
   ) {
     super(name, vscode.TreeItemCollapsibleState.None);
     const pct = fc.metrics.linePercent;
-    const brPct = fc.metrics.totalBranches > 0 ? ` | br: ${fc.metrics.branchPercent}%` : '';
+    const brPct = fc.metrics.totalBranches > 0 ? ` | ${fc.metrics.branchPercent}%` : '';
     this.description = `${pct}%${brPct}`;
     this.tooltip = `Lines: ${fc.metrics.coveredLines}/${fc.metrics.totalLines} (${pct}%)\nBranches: ${fc.metrics.coveredBranches}/${fc.metrics.totalBranches}`;
     this.iconPath = iconForPct(pct, thresholds);
@@ -157,12 +202,13 @@ class CoverageFolderItem extends CoverageTreeItem {
   constructor(
     name: string,
     children: CoverageTreeItem[],
-    pct: number
+    pct: number,
+    thresholds: { low: number; medium: number }
   ) {
     super(name, vscode.TreeItemCollapsibleState.Collapsed);
     this.children = children;
     this.description = `${pct}%`;
-    this.iconPath = new vscode.ThemeIcon('folder');
+    this.iconPath = iconForPct(pct, thresholds);
     this.contextValue = 'coverlens.folder';
   }
 }
