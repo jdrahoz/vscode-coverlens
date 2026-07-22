@@ -58,47 +58,59 @@ export class CoverageTreeProvider implements vscode.TreeDataProvider<CoverageTre
   }
 
   private buildTree(): CoverageTreeItem[] {
-    if (this.coverageMap.size === 0) return [];
+    // Group files into a virtual folder tree
+    const root: Record<string, any> = {};
 
-    // Compute relative paths for all entries
-    const entries: Array<{ rel: string; absPath: string; fc: FileCoverage }> = [];
     for (const [absPath, fc] of this.coverageMap) {
       const rel = path.relative(this.workspaceRoot, absPath).replace(/\\/g, '/');
-      entries.push({ rel, absPath, fc });
+      const parts = rel.split('/');
+      let node = root;
+      for (let i = 0; i < parts.length - 1; i++) {
+        node[parts[i]] = node[parts[i]] ?? {};
+        node = node[parts[i]];
+      }
+      node[parts[parts.length - 1]] = fc;
     }
 
-    // Strip the longest common directory prefix shared by all files so that
-    // paths like "src/main/java/com/example/Foo.java" become "com/example/Foo.java".
-    const prefix = commonDirPrefix(entries.map(e => e.rel));
+    return this.nodeToItems(root, this.workspaceRoot);
+  }
 
-    // Group by package: all directory segments (dot-joined) above the filename.
-    // Files at the root (no directory segments left after prefix removal) use
-    // the empty string as a sentinel for an "(root)" package label.
-    const packageMap = new Map<string, Array<{ name: string; absPath: string; fc: FileCoverage }>>();
-
-    for (const { rel, absPath, fc } of entries) {
-      const stripped = prefix ? rel.slice(prefix.length) : rel;
-      const parts = stripped.split('/');
-      const fileName = parts[parts.length - 1];
-      const pkgLabel = parts.slice(0, -1).join('.');
-
-      if (!packageMap.has(pkgLabel)) packageMap.set(pkgLabel, []);
-      packageMap.get(pkgLabel)!.push({ name: fileName, absPath, fc });
-    }
-
-    // Build one CoveragePackageItem per package
+  private nodeToItems(node: Record<string, any>, currentPath: string): CoverageTreeItem[] {
     const items: CoverageTreeItem[] = [];
-    for (const [pkgLabel, files] of packageMap) {
-      const fileItems = files
-        .map(({ name, absPath, fc }) => new CoverageFileItem(name, fc, this.thresholds, absPath))
-        .sort((a, b) => a.label!.toString().localeCompare(b.label!.toString()));
 
-      const aggPct = this.aggregatePct(files.map(f => f.fc));
-      const displayLabel = pkgLabel || '(root)';
-      items.push(new CoveragePackageItem(displayLabel, fileItems, aggPct));
+    for (const [name, value] of Object.entries(node)) {
+      const childPath = path.join(currentPath, name);
+
+      if (value && typeof value === 'object' && 'filePath' in value) {
+        // It's a FileCoverage
+        const fc = value as FileCoverage;
+        items.push(new CoverageFileItem(name, fc, this.thresholds, childPath));
+      } else {
+        // It's a folder — compute aggregate
+        const children = this.nodeToItems(value as Record<string, any>, childPath);
+        const allFcs = this.collectFileCoverages(value as Record<string, any>);
+        const aggPct = this.aggregatePct(allFcs);
+        items.push(new CoverageFolderItem(name, children, aggPct));
+      }
     }
 
-    return items.sort((a, b) => a.label!.toString().localeCompare(b.label!.toString()));
+    return items.sort((a, b) => {
+      // Folders first, then files
+      const aIsFolder = a instanceof CoverageFolderItem;
+      const bIsFolder = b instanceof CoverageFolderItem;
+      if (aIsFolder && !bIsFolder) return -1;
+      if (!aIsFolder && bIsFolder) return 1;
+      return a.label!.toString().localeCompare(b.label!.toString());
+    });
+  }
+
+  private collectFileCoverages(node: Record<string, any>): FileCoverage[] {
+    const result: FileCoverage[] = [];
+    for (const val of Object.values(node)) {
+      if (val.lines && val.branches) result.push(val as FileCoverage);
+      else result.push(...this.collectFileCoverages(val as Record<string, any>));
+    }
+    return result;
   }
 
   private aggregatePct(fcs: FileCoverage[]): number {
@@ -141,43 +153,18 @@ class CoverageFileItem extends CoverageTreeItem {
   }
 }
 
-class CoveragePackageItem extends CoverageTreeItem {
+class CoverageFolderItem extends CoverageTreeItem {
   constructor(
-    label: string,
+    name: string,
     children: CoverageTreeItem[],
     pct: number
   ) {
-    super(label, vscode.TreeItemCollapsibleState.Collapsed);
+    super(name, vscode.TreeItemCollapsibleState.Collapsed);
     this.children = children;
     this.description = `${pct}%`;
-    this.iconPath = new vscode.ThemeIcon('package');
-    this.contextValue = 'coverlens.package';
+    this.iconPath = new vscode.ThemeIcon('folder');
+    this.contextValue = 'coverlens.folder';
   }
-}
-
-/**
- * Returns the longest common directory prefix shared by all relative paths,
- * always ending with a trailing slash so it can be sliced off cleanly.
- * e.g. ["src/main/java/com/Foo.java", "src/main/java/com/Bar.java"]
- *      → "src/main/java/"
- */
-function commonDirPrefix(paths: string[]): string {
-  if (paths.length === 0) return '';
-
-  // Work with directory-segment arrays only (drop the filename)
-  const dirParts = paths.map(p => p.split('/').slice(0, -1));
-
-  const shortest = dirParts.reduce((a, b) => (a.length <= b.length ? a : b));
-  let common: string[] = [];
-  for (let i = 0; i < shortest.length; i++) {
-    if (dirParts.every(parts => parts[i] === shortest[i])) {
-      common.push(shortest[i]);
-    } else {
-      break;
-    }
-  }
-
-  return common.length > 0 ? common.join('/') + '/' : '';
 }
 
 function iconForPct(pct: number, t: { low: number; medium: number }): vscode.ThemeIcon {
