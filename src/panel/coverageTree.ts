@@ -58,7 +58,8 @@ export class CoverageTreeProvider implements vscode.TreeDataProvider<CoverageTre
     const allFcs = [...this.coverageMap.values()];
     const totalPct = this.aggregatePct(allFcs);
     const totalLines = allFcs.reduce((s, f) => s + f.metrics.totalLines, 0);
-    const summary = new CoverageSummaryItem(totalPct, allFcs.length, totalLines, this.thresholds);
+    const coveredLines = allFcs.reduce((s, f) => s + f.metrics.coveredLines, 0);
+    const summary = new CoverageSummaryItem(totalPct, allFcs.length, coveredLines, totalLines, this.thresholds);
 
     return [summary, ...tree];
   }
@@ -166,10 +167,9 @@ abstract class CoverageTreeItem extends vscode.TreeItem {
 }
 
 class CoverageSummaryItem extends CoverageTreeItem {
-  constructor(pct: number, fileCount: number, totalLines: number, thresholds: { low: number; medium: number }) {
+  constructor(pct: number, coveredLines: number, totalLines: number, thresholds: { low: number; medium: number }) {
     super('Total Coverage', vscode.TreeItemCollapsibleState.None);
-    this.description = `${pct}%  ·  ${fileCount} files  ·  ${totalLines.toLocaleString()} lines`;
-    this.tooltip = `Overall project coverage: ${pct}%\nFiles: ${fileCount}\nLines: ${totalLines.toLocaleString()}`;
+    this.description = `${pct}%  ·  ${coveredLines.toLocaleString()}/${totalLines.toLocaleString()} lines`;
     this.iconPath = iconForPct(pct, thresholds);
     this.contextValue = 'coverlens.summary';
   }
@@ -184,9 +184,8 @@ class CoverageFileItem extends CoverageTreeItem {
   ) {
     super(name, vscode.TreeItemCollapsibleState.None);
     const pct = fc.metrics.linePercent;
-    const brPct = fc.metrics.totalBranches > 0 ? ` | ${fc.metrics.branchPercent}%` : '';
+    const brPct = fc.metrics.totalBranches > 0 ? `  ·  ${fc.metrics.branchPercent}%` : '';
     this.description = `${pct}%${brPct}`;
-    this.tooltip = `Lines: ${fc.metrics.coveredLines}/${fc.metrics.totalLines} (${pct}%)\nBranches: ${fc.metrics.coveredBranches}/${fc.metrics.totalBranches}`;
     this.iconPath = iconForPct(pct, thresholds);
     this.resourceUri = vscode.Uri.file(absPath);
     this.command = {
